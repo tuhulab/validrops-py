@@ -92,9 +92,13 @@ def test_meta_records_duplicate_name_pattern():
 
 def test_pbmc_detection_rooted_at_repo():
     state = _measure.resolve_pbmc_state({"pbmc_override": "auto", "pbmc_path": None})
-    assert state["available"] is True  # tests/data/pbmc4k/raw.h5 is present in this checkout
-    assert state["path"].endswith("tests/data/pbmc4k/raw.h5")
+    # Resolution is rooted at the repository tree, not the CWD, so the default
+    # path is deterministic in any working directory. The fixture itself is
+    # git-ignored (see .gitignore), so availability mirrors on-disk presence
+    # instead of being assumed.
+    assert state["path"] == str(_measure.REPO_ROOT / "tests/data/pbmc4k/raw.h5")
     assert state["override"] == "auto"
+    assert state["available"] is Path(state["path"]).is_file()
 
 
 def test_pbmc_override_yes_and_no(tmp_path):
@@ -206,3 +210,109 @@ def test_pbmc_absence_yields_explicit_skip_artifact(tmp_path):
     assert artifact["pbmc"]["path"]
     assert artifact["correctness"]["status"] == "skipped"
     assert any("PBMC4K" in w and "tests/data/pbmc4k/raw.h5" in w for w in artifact["warnings"])
+
+
+def test_fixture_registry_rooted_at_repo():
+    from benchmarks import _fixtures
+
+    state = _fixtures.resolve_fixture("pbmc-parotid", "auto")
+    # Same repo-rooting contract as the PBMC4K gate: the path never depends on
+    # the CWD, and availability mirrors on-disk presence (fixtures are
+    # git-ignored).
+    assert state["path"] == str(_measure.REPO_ROOT / "tests/data/pbmc-parotid/raw.h5")
+    assert state["override"] == "auto"
+    assert state["dataset"] == "pbmc-parotid"
+    assert state["available"] is Path(state["path"]).is_file()
+    with pytest.raises(ValueError, match="unknown dataset"):
+        _fixtures.resolve_fixture("does-not-exist", "auto")
+
+
+def test_real_tier_absent_yields_skip_artifact(tmp_path):
+    artifact = _measure.run_benchmark(
+        benchmark="tier-m-real",
+        implementation="current",
+        profile="smoke",
+        seed=0,
+        repetitions=1,
+        timeout=60,
+        output_dir=None,
+        pbmc_override="no",
+        pbmc_path=None,
+        dataset="pbmc-parotid",
+    )
+    assert artifact["fixture"]["available"] is False
+    assert artifact["fixture"]["dataset"] == "pbmc-parotid"
+    assert artifact["correctness"]["status"] == "skipped"
+    assert any("pbmc-parotid" in w and "raw.h5" in w for w in artifact["warnings"])
+
+
+def test_h2h_absent_yields_skip_artifact(tmp_path):
+    artifact = _measure.run_benchmark(
+        benchmark="tier-h2h-qc",
+        implementation="baseline",
+        profile="smoke",
+        seed=0,
+        repetitions=1,
+        timeout=60,
+        output_dir=None,
+        pbmc_override="no",
+        pbmc_path=None,
+        dataset="pbmc-parotid",
+    )
+    assert artifact["fixture"]["available"] is False
+    assert artifact["correctness"]["status"] == "skipped"
+    assert artifact["input"]["params"]["seurat_mito_cap"] == 0.20  # defaults recorded in params
+    assert artifact["input"]["params"]["dataset"] == "pbmc-parotid"
+
+
+@pytest.mark.slow
+def test_h2h_agreement_sane_on_present_fixture():
+    from benchmarks import _fixtures
+
+    path = _fixtures.fixture_expected_path("pbmc-parotid")
+    if not Path(path).is_file():
+        pytest.skip("tests/data/pbmc-parotid/raw.h5 missing")
+    artifact = _measure.run_benchmark(
+        benchmark="tier-h2h-qc",
+        implementation="current",
+        profile="smoke",
+        seed=0,
+        repetitions=1,
+        timeout=600,
+        output_dir=None,
+        dataset="pbmc-parotid",
+    )
+    assert artifact["correctness"]["status"] == "pass"
+    m = artifact["correctness"]["metrics"]
+    assert m["n_total"] == 1500
+    assert m["n_kept_validrops"] >= 1
+    assert m["n_kept_seurat_style"] >= 1
+    assert 0.0 <= m["jaccard_kept_sets"] <= 1.0
+    assert np.isfinite(m["jaccard_kept_sets"])
+    assert m["deterministic_warmup_timed"] is True
+
+
+@pytest.mark.slow
+def test_real_tier_clusters_on_present_fixture():
+    from benchmarks import _fixtures
+
+    path = _fixtures.fixture_expected_path("pbmc-parotid")
+    if not Path(path).is_file():
+        pytest.skip("tests/data/pbmc-parotid/raw.h5 missing")
+    artifact = _measure.run_benchmark(
+        benchmark="tier-m-real",
+        implementation="current",
+        profile="smoke",
+        seed=0,
+        repetitions=1,
+        timeout=600,
+        output_dir=None,
+        dataset="pbmc-parotid",
+    )
+    assert artifact["correctness"]["status"] == "pass"
+    m = artifact["correctness"]["metrics"]
+    assert m["dataset"] == "pbmc-parotid"
+    assert m["n_obs"] == 1500
+    assert m["all_cells_clustered"] is True
+    assert m["n_clusters"] >= 2
+    assert m["species_detected"] == "human"

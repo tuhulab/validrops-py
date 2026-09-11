@@ -22,3 +22,9 @@ and this project adheres to [Semantic Versioning][].
 - `validrops.pl`: QC diagnostic plots (barcode rank, mito threshold, UMI vs features, coding fraction, dead score)
 - Validation suite against R-generated fixtures on PBMC 4K, with a bounded end-to-end barcode concordance of 0.9193
 - Package scaffolding: CI (test/build/release), Sphinx docs on readthedocs, pre-commit, codecov
+- Benchmark harness (Package 2): `tier-m-real` registry-driven real-data Stage-3 family and `tier-h2h-qc` head-to-head QC family (validrops Stage 1+2 vs a Seurat-default baseline cross-validated against Seurat 5.5.1), with the first non-PBMC fixture — human parotid gland, 10x v3 (CC-BY-4.0) — documented in `benchmarks/README.md`
+
+### Fixed
+
+- `test_pbmc_detection_rooted_at_repo` asserted the git-ignored PBMC4K fixture is present, which could never hold on CI; availability now mirrors on-disk presence (fixture-gated tests skip when absent)
+- Sphinx `-W` build failed on `docs/internal/**` (untracked working notes never added to a toctree, with xrefs into excluded `docs/superpowers/**`); internal notes are now excluded from the published build like `docs/superpowers/**`

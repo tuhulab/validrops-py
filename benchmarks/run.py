@@ -34,6 +34,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout", type=float, default=300.0, help="per-repetition child timeout (seconds)")
     parser.add_argument("--pbmc-override", choices=["auto", "yes", "no"], default="auto")
     parser.add_argument("--pbmc-path", default=None)
+    parser.add_argument(
+        "--dataset",
+        default=None,
+        help=f"dataset fixture for tier-m-real/tier-h2h-qc; default {_measure._fixtures.DEFAULT_DATASET}",
+    )
     args = parser.parse_args(argv)
 
     artifact = _measure.run_benchmark(
@@ -46,6 +51,7 @@ def main(argv: list[str] | None = None) -> int:
         output_dir=args.output_dir,
         pbmc_override=args.pbmc_override,
         pbmc_path=args.pbmc_path,
+        dataset=args.dataset,
     )
     summary = {
         "benchmark": artifact["benchmark"],

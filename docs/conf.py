@@ -106,7 +106,16 @@ intersphinx_mapping = {
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "**.ipynb_checkpoints", "superpowers/**"]
+exclude_patterns = [
+    "_build",
+    "Thumbs.db",
+    ".DS_Store",
+    "**.ipynb_checkpoints",
+    "superpowers/**",
+    # Internal working notes (designs/plans/validation contracts) are tracked
+    # for the repo record, not published on Read the Docs.
+    "internal/**",
+]
 
 
 # -- Options for HTML output -------------------------------------------------

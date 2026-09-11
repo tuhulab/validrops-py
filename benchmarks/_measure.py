@@ -32,6 +32,8 @@ from pathlib import Path
 
 import numpy as np
 
+from benchmarks import _fixtures
+
 SCHEMA_VERSION = 1
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -42,6 +44,8 @@ DEFAULT_REPETITIONS = {
     "graph-conversion": 7,
     "tier-s": 3,
     "tier-m-pbmc": 3,
+    "tier-m-real": 3,
+    "tier-h2h-qc": 3,
 }
 KERNEL_NAMES = tuple(DEFAULT_REPETITIONS)
 
@@ -221,16 +225,31 @@ def _file_hashes(paths) -> dict:
 
 def _implementation_record(benchmark: str, implementation: str) -> dict:
     tl = REPO_ROOT / "src" / "validrops" / "tl"
+    pp = REPO_ROOT / "src" / "validrops" / "pp"
     sources = [REPO_ROOT / "src" / "validrops" / "_constants.py"]
-    if benchmark in ("cluster-means", "tier-s", "tier-m-pbmc"):
+    if benchmark in ("cluster-means", "tier-s", "tier-m-pbmc", "tier-m-real", "tier-h2h-qc"):
         sources.append(tl / "expression_metrics.py")
-    if benchmark in ("graph-conversion", "tier-s", "tier-m-pbmc"):
+    if benchmark in ("graph-conversion", "tier-s", "tier-m-pbmc", "tier-m-real", "tier-h2h-qc"):
         sources.append(tl / "_snn.py")
-    harness = [REPO_ROOT / "benchmarks" / f"{name}.py" for name in ("_datasets", "_measure", "run")]
+    if benchmark in ("tier-m-real", "tier-h2h-qc"):
+        sources.append(tl / "quality_metrics.py")
+        sources.append(tl / "_deviance.py")
+    if benchmark == "tier-h2h-qc":
+        sources.extend(
+            [
+                pp / "rank_barcodes.py",
+                pp / "quality_filter.py",
+                tl / "_segmented.py",
+                tl / "_stats.py",
+                tl / "_uik.py",
+                REPO_ROOT / "src" / "validrops" / "_pipeline.py",
+            ]
+        )
+    sources.extend([REPO_ROOT / "benchmarks" / f"{name}.py" for name in ("_datasets", "_fixtures", "_measure", "run")])
     return {
         "label": implementation,
         "source_hashes": _file_hashes(sources),
-        "harness_hashes": _file_hashes(harness),
+        "harness_hashes": _file_hashes(sources[-4:]),
     }
 
 
@@ -689,6 +708,217 @@ def _pbmc_sample(input_: dict) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# tier-m-real: generic real-dataset Stage-3 workload (fixture registry)
+# ---------------------------------------------------------------------------
+
+
+def _real_param(payload: dict) -> dict:
+    state = _fixtures.resolve_fixture(payload["dataset"], payload["pbmc_override"], payload["pbmc_path"])
+    p = payload["params"]
+    return {
+        "data": state,
+        "meta": {
+            "cells_cap": p.get("n_cells_cap"),
+            "source": state["meta"]["tissue"],
+            "species": state["meta"]["species"],
+            "chemistry": state["meta"]["chemistry"],
+            "license": state["meta"]["license"],
+            "fixture_cells": state["meta"]["n_cells"],
+            "fixture_genes": state["meta"]["n_genes"],
+        },
+        "fingerprint": _sha256(state["path"].encode()),
+        "params": p,
+        "impl": payload["implementation"],
+    }
+
+
+def _build_real_adata(input_: dict):
+    p = input_["params"]
+    adata = _fixtures.load_fixture_adata(input_["data"]["path"], p["n_cells_cap"])
+    adata.obs["qc_pass"] = True
+    return adata
+
+
+def _run_real_tier(input_: dict) -> dict:
+    import validrops
+
+    p = input_["params"]
+    adata = _build_real_adata(input_)
+    validrops.tl.quality_metrics(adata)
+    validrops.tl.expression_metrics(adata, nfeats=p["nfeats"], npcs=p["npcs"], random_state=p["seed"])
+    return _tier_s_summary(adata)
+
+
+def _verify_real_tier(input_: dict) -> dict:
+    import importlib
+
+    import validrops
+
+    p = input_["params"]
+    adata = _build_real_adata(input_)
+    validrops.tl.quality_metrics(adata)
+    validrops.tl.expression_metrics(adata, nfeats=p["nfeats"], npcs=p["npcs"], k_min=p["k_min"], random_state=p["seed"])
+    summary = _tier_s_summary(adata)
+    stats = adata.uns["validrops"]["cluster_stats"]
+    em_module = importlib.import_module("validrops.tl.expression_metrics")
+    metrics = {
+        "workload": f"Stage-3 expression_metrics on {p['dataset']} (bounded subset)",
+        "all_cells_clustered": bool((~adata.obs["cluster"].isna()).all()),
+        "stats_frame_columns": list(stats.columns) == list(em_module.STAT_COLUMNS),
+        "n_clusters": summary["n_clusters"],
+        "stats_shape": summary["stats_shape"],
+        "n_obs": summary["n_obs"],
+        "species_detected": adata.uns["validrops"].get("species"),
+        "dataset": p["dataset"],
+    }
+    ok = metrics["all_cells_clustered"] and metrics["n_clusters"] >= 1
+    return {"status": "pass" if ok else "fail", "metrics": metrics}
+
+
+def _real_tier_sample(input_: dict) -> dict:
+    out = _run_real_tier(input_)
+    return {
+        "elapsed": None,
+        "rss_bytes": None,
+        "output_fingerprint": out["cluster_fingerprint"] + f"-{out['n_clusters']}",
+        "correctness": _verify_real_tier(input_),
+        "warnings": [],
+    }
+
+
+# ---------------------------------------------------------------------------
+# tier-h2h-qc: validrops vs Seurat-style default QC on an identical fixture
+# ---------------------------------------------------------------------------
+#
+# The reference side re-implements the classic, published Seurat QC defaults
+# (nFeature/nCount minima and a mitochondrial-fraction cap) deterministically
+# in Python so the family runs anywhere without an R runtime. The thresholds
+# are recorded in every artifact; benchmarks/R/h2h_seurat_crosscheck.R
+# cross-validates this baseline against real Seurat 5.5.1 on the same matrix.
+
+
+def _seurat_style_qc(
+    adata,
+    mito_cap: float,
+    min_features: int,
+    min_counts: int,
+    min_cells: int = 3,
+) -> np.ndarray:
+    """Deterministic re-implementation of Seurat's default QC subset.
+
+    Mirrors what ``CreateSeuratObject`` + ``subset()`` achieve with the
+    classic defaults: genes present in fewer than ``min_cells`` cells are
+    dropped before ANY cell-level metric is computed (Seurat's ``min.cells``
+    default is 3; ``nCount_RNA``/``nFeature_RNA``/``percent.mt`` are all
+    calculated on the gene-filtered object). A barcode passes iff the
+    mitochondrial fraction, feature count, and UMI count meet the caps. Mito
+    symbols are matched by the standard ``MT-/Mt-/mt-`` prefixes
+    (human/mouse), the same families validrops detects in
+    ``quality_metrics``. Cross-checked against Seurat 5.x in
+    ``benchmarks/R/h2h_seurat_crosscheck.R``.
+    """
+    X = adata.X
+    gene_presence = X > 0
+    keep_genes = np.asarray(gene_presence.sum(axis=0)).ravel() >= min_cells
+    mito_mask = np.asarray(adata.var_names.str.match(r"^(MT|Mt|mt)-"))
+    if keep_genes.any() and not keep_genes.all():
+        X = X[:, keep_genes]
+        mito_mask = mito_mask[keep_genes]
+    totals = np.asarray(X.sum(axis=1, dtype=np.float64)).ravel()
+    features = np.asarray((X > 0).sum(axis=1)).ravel().astype(np.float64)
+    mito_frac = np.zeros(adata.n_obs, dtype=np.float64)
+    if mito_mask.any():
+        mito_totals = np.asarray(X[:, mito_mask].sum(axis=1, dtype=np.float64)).ravel()
+        mito_frac = mito_totals / np.where(totals > 0, totals, 1.0)
+    return ((mito_frac <= mito_cap) & (features >= min_features) & (totals >= min_counts)).astype(bool)
+
+
+def _validrops_qc(adata, random_state: int) -> np.ndarray:
+    """Stage 1 + 2 QC callouts exactly as ``validrops()`` runs them."""
+    import validrops
+
+    validrops.pp.rank_barcodes(adata, random_state=random_state)
+    validrops.tl.quality_metrics(adata)
+    validrops.pp.quality_filter(adata, random_state=random_state)
+    return adata.obs["qc_pass"].to_numpy(dtype=bool)
+
+
+def _h2h_masks(input_: dict) -> tuple[np.ndarray, np.ndarray, dict]:
+    """Run both QC pipelines on independent copies; returns (validrops, seurat, info)."""
+    base = _build_real_adata(input_)
+    v_adata = base.copy()
+    v_mask = _validrops_qc(v_adata, input_["params"]["seed"])
+    s_mask = _seurat_style_qc(
+        base.copy(),
+        input_["params"]["seurat_mito_cap"],
+        input_["params"]["seurat_min_features"],
+        input_["params"]["seurat_min_counts"],
+    )
+    uns = v_adata.uns.get("validrops", {})
+    info = {
+        "validrops_mito_threshold": float(uns.get("mitochondrial_threshold", float("nan"))),
+        "validrops_mito_method": uns.get("mito_threshold_method"),
+    }
+    return v_mask, s_mask, info
+
+
+def _agreement_metrics(v_mask: np.ndarray, s_mask: np.ndarray, n_total: int) -> dict:
+    kept_v = int(v_mask.sum())
+    kept_s = int(s_mask.sum())
+    jaccard = float(
+        np.intersect1d(np.flatnonzero(v_mask), np.flatnonzero(s_mask)).size
+        / max(1, np.union1d(np.flatnonzero(v_mask), np.flatnonzero(s_mask)).size)
+    )
+    return {
+        "n_total": n_total,
+        "n_kept_validrops": kept_v,
+        "n_kept_seurat_style": kept_s,
+        "fraction_kept_validrops": kept_v / n_total,
+        "fraction_kept_seurat_style": kept_s / n_total,
+        "jaccard_kept_sets": jaccard,
+        "kept_set_difference": int(np.logical_xor(v_mask, s_mask).sum()),
+    }
+
+
+def _run_h2h_impl(input_: dict, impl: str) -> np.ndarray:
+    adata = _build_real_adata(input_)
+    if impl == "baseline":
+        p = input_["params"]
+        return _seurat_style_qc(adata, p["seurat_mito_cap"], p["seurat_min_features"], p["seurat_min_counts"])
+    return _validrops_qc(adata, input_["params"]["seed"])
+
+
+def _verify_h2h(input_: dict) -> dict:
+    p = input_["params"]
+    v_mask, s_mask, info = _h2h_masks(input_)
+    metrics = {
+        "workload": f"QC head-to-head on {p['dataset']} (bounded subset)",
+        "dataset": p["dataset"],
+        "baseline": "Seurat-style default thresholds (n_features>=200, n_counts>=500, mito<=0.20, min_cells=3)",
+        **info,
+        **_agreement_metrics(v_mask, s_mask, int(v_mask.size)),
+    }
+    ok = (
+        metrics["n_kept_validrops"] >= 1
+        and metrics["n_kept_seurat_style"] >= 1
+        and np.isfinite(metrics["jaccard_kept_sets"])
+        and 0.0 <= metrics["jaccard_kept_sets"] <= 1.0
+    )
+    return {"status": "pass" if ok else "fail", "metrics": metrics}
+
+
+def _h2h_sample(input_: dict) -> dict:
+    mask = _run_h2h_impl(input_, input_["impl"])
+    return {
+        "elapsed": None,
+        "rss_bytes": None,
+        "output_fingerprint": _sha256(np.asarray(mask, dtype=np.uint8).tobytes(), repr(int(mask.sum())).encode()),
+        "correctness": _verify_h2h(input_),
+        "warnings": [],
+    }
+
+
 # Dispatch tables -----------------------------------------------------------
 
 _INPUT_BUILDERS = {
@@ -696,6 +926,8 @@ _INPUT_BUILDERS = {
     "graph-conversion": _graph_conversion_param,
     "tier-s": _tier_s_param,
     "tier-m-pbmc": _pbmc_param,
+    "tier-m-real": _real_param,
+    "tier-h2h-qc": _real_param,
 }
 
 _SAMPLE_RUNNERS = {
@@ -703,6 +935,8 @@ _SAMPLE_RUNNERS = {
     "graph-conversion": _graph_conversion_sample,
     "tier-s": _tier_s_sample,
     "tier-m-pbmc": _pbmc_sample,
+    "tier-m-real": _real_tier_sample,
+    "tier-h2h-qc": _h2h_sample,
 }
 
 _VERIFIERS = {
@@ -710,6 +944,8 @@ _VERIFIERS = {
     "graph-conversion": _verify_graph_conversion,
     "tier-s": _verify_tier_s,
     "tier-m-pbmc": _verify_pbmc_tier,
+    "tier-m-real": _verify_real_tier,
+    "tier-h2h-qc": _verify_h2h,
 }
 
 
@@ -788,7 +1024,7 @@ def _bounded_stage_params(profile: str) -> dict:
     }
 
 
-def _family_params(benchmark: str, profile: str) -> dict:
+def _family_params(benchmark: str, profile: str, dataset: str | None = None) -> dict:
     from benchmarks._datasets import PROFILES
 
     if benchmark == "cluster-means":
@@ -819,6 +1055,32 @@ def _family_params(benchmark: str, profile: str) -> dict:
             "n_cells_cap": 1200,
             "workload": "Stage-3 PBMC4K",
         }
+    if benchmark == "tier-m-real":
+        name = dataset or _fixtures.DEFAULT_DATASET
+        return {
+            "profile": profile,
+            **_bounded_stage_params(profile),
+            "k_min": 150,
+            "n_cells_cap": 1500,
+            "dataset": name,
+            "workload": f"Stage-3 {name}",
+        }
+    if benchmark == "tier-h2h-qc":
+        name = dataset or _fixtures.DEFAULT_DATASET
+        # Same bounded real subset as tier-m-real; the Seurat-style defaults are
+        # recorded as parameters so every artifact is self-describing and the
+        # baseline is reproducible (cross-checked against Seurat 5.5.1 in
+        # benchmarks/R/h2h_seurat_crosscheck.R).
+        return {
+            "profile": profile,
+            "n_cells_cap": 1500,
+            "dataset": name,
+            "seurat_mito_cap": 0.20,
+            "seurat_min_features": 200,
+            "seurat_min_counts": 500,
+            "seurat_min_cells": 3,
+            "workload": f"QC head-to-head {name}",
+        }
     raise ValueError(f"unknown benchmark {benchmark!r}")
 
 
@@ -832,12 +1094,14 @@ def run_benchmark(
     output_dir: str | None = None,
     pbmc_override: str = "auto",
     pbmc_path: str | None = None,
+    dataset: str | None = None,
 ) -> dict:
     """Run one benchmark family and return the schema-version-1 artifact dict.
 
     Each repetition executes in a fresh spawn child (warm-up inside the child,
     then one timed run). ``repetitions=1`` is only allowed for the ``smoke``
-    profile (schema/smoke checks).
+    profile (schema/smoke checks). ``dataset`` selects the real fixture for
+    ``tier-m-real`` and ``tier-h2h-qc`` (see ``benchmarks/_fixtures.py``).
     """
     if benchmark not in KERNEL_NAMES:
         raise ValueError(f"unknown benchmark {benchmark!r}; choose from {sorted(KERNEL_NAMES)}")
@@ -847,6 +1111,8 @@ def run_benchmark(
 
     if profile not in PROFILES:
         raise ValueError(f"unknown profile {profile!r}; choose from {sorted(PROFILES)}")
+    if dataset is not None and dataset not in _fixtures.FIXTURES:
+        raise ValueError(f"unknown dataset {dataset!r}; choose from {_fixtures.known_datasets()}")
 
     n_reps = DEFAULT_REPETITIONS[benchmark] if repetitions is None else repetitions
     if n_reps < 1:
@@ -854,7 +1120,7 @@ def run_benchmark(
     if n_reps == 1 and profile != "smoke":
         raise ValueError("--repetitions 1 is only allowed for the smoke profile (schema/smoke checks)")
 
-    params = _family_params(benchmark, profile)
+    params = _family_params(benchmark, profile, dataset)
     params["seed"] = seed  # part of the exact-parameter record; also gates comparisons
     payload = {
         "benchmark": benchmark,
@@ -864,10 +1130,21 @@ def run_benchmark(
         "params": params,
         "pbmc_override": pbmc_override,
         "pbmc_path": pbmc_path,
+        "dataset": params.get("dataset"),
     }
 
     git = _git_state()
     pbmc = resolve_pbmc_state(payload)
+    fixture = None
+    fixture_expected = None
+    if benchmark == "tier-m-pbmc":
+        # PBMC4K family keeps its historical hardwired resolution.
+        fixture = pbmc
+        fixture_expected = PBMC_EXPECTED
+    elif params.get("dataset"):
+        # Registry-based real-data families resolve their own fixture.
+        fixture = _fixtures.resolve_fixture(params["dataset"], pbmc_override, pbmc_path)
+        fixture_expected = fixture["path"]
     input_spec = _INPUT_BUILDERS[benchmark](payload)
     input_record = {
         "profile": profile,
@@ -877,7 +1154,8 @@ def run_benchmark(
     }
 
     warnings: list[str] = []
-    if benchmark == "tier-m-pbmc" and not pbmc["available"]:
+    if fixture is not None and not fixture["available"]:
+        label = "PBMC4K" if benchmark == "tier-m-pbmc" else f"dataset {params['dataset']}"
         artifact = {
             "schema_version": SCHEMA_VERSION,
             "benchmark": benchmark,
@@ -902,11 +1180,12 @@ def run_benchmark(
                 "method": "resource.getrusage(RUSAGE_SELF).ru_maxrss inside each spawned child",
                 "scope": "per-repetition spawned child process (native allocations included)",
                 "unit": "bytes",
-                "unavailable_reason": "benchmark skipped (PBMC4K fixture absent)",
+                "unavailable_reason": f"benchmark skipped ({label} fixture absent)",
             },
             "correctness": {"status": "skipped", "metrics": {}},
-            "warnings": [f"PBMC4K fixture not available; expected at {pbmc['path']}"],
-            "pbmc": pbmc,
+            "warnings": [f"{label} fixture not available; expected at {fixture_expected}"],
+            "pbmc": pbmc if benchmark == "tier-m-pbmc" else None,
+            "fixture": fixture,
         }
         if output_dir:
             write_artifacts(artifact, output_dir=output_dir)
@@ -1001,7 +1280,8 @@ def run_benchmark(
         },
         "correctness": {"status": combined_status, "metrics": correctness_metrics},
         "warnings": warnings,
-        "pbmc": pbmc,
+        "pbmc": pbmc if benchmark == "tier-m-pbmc" else None,
+        "fixture": fixture,
     }
     if output_dir:
         write_artifacts(artifact, output_dir=output_dir)

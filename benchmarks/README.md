@@ -33,15 +33,69 @@ kernels and 3 for the pipeline tiers; `--repetitions 1` is only allowed for
 | `graph-conversion` | deep-clustering resolution search (`louvain` per resolution) | `louvain(adjacency, res)` — igraph built per call | `prepare_louvain_graph` once + `louvain_prepared` per call |
 | `tier-s` | full Stage-3 `expression_metrics` on deterministic synthetic data | current production code | same entry point, run after the optimization |
 | `tier-m-pbmc` | full Stage-3 on a bounded real PBMC4K subset | current production code | same, with a configured run |
+| `tier-m-real` | full Stage-3 on a bounded subset of any registered dataset (`--dataset`) | current production code | same, with a configured run |
+| `tier-h2h-qc` | full QC (Stage 1 + 2) vs a Seurat-default baseline on an identical bounded subset | Seurat-style default thresholds (`n_features >= 200`, `n_counts >= 500`, `mito <= 0.20`, `min_cells = 3`), re-implemented deterministically in Python | `pp.rank_barcodes` + `tl.quality_metrics` + `pp.quality_filter` |
 
 `tier-m-pbmc` detects the fixture at `tests/data/pbmc4k/raw.h5` (rooted at the
 repository, never the CWD). With `--pbmc-override no`, or when the fixture is
 absent, the artifact reports `available: false`, the expected path, and
 correctness `skipped` — it never fabricates a run.
 
-Honest naming: `tier-s` and `tier-m-pbmc` are **Stage-3 workloads** (barcode QC
-stages excluded); thread experiments on them say nothing about Stage-4 ridge
-oversubscription.
+`tier-m-real` and `tier-h2h-qc` resolve fixtures through the registry in
+`benchmarks/_fixtures.py` and behave the same way when a dataset is absent:
+artifacts record `fixture.available: false`, the repo-rooted expected path, and
+correctness `skipped`.
+
+Honest naming: `tier-s`, `tier-m-pbmc` and `tier-m-real` are **Stage-3
+workloads** (barcode QC stages excluded); thread experiments on them say
+nothing about Stage-4 ridge oversubscription. `tier-h2h-qc` is a QC-stage
+agreement benchmark: the timed region includes fixture loading (identical for
+baseline and current), so runtimes are directly comparable and the pipeline
+delta is the difference.
+
+## Real-data fixtures (Package 2)
+
+Fixtures are **never committed** (git-ignored `tests/data/`); downloading is a
+documented, reproducible step under the `benchmarks/_fetch_fixtures.py` script
+with size checks. Registry entries live in `benchmarks/_fixtures.py`; adding a
+dataset for the preprint (different tissue/condition/technology) is one entry.
+
+| Dataset | `--dataset` | Fixture path | Tissue / species | Chemistry | License / source |
+|---|---|---|---|---|---|
+| PBMC 4K | (tier-m-pbmc) | `tests/data/pbmc4k/raw.h5` | PBMC / human | 10x v2 | 10x Genomics demo; 17 MB |
+| Parotid gland | `pbmc-parotid` | `tests/data/pbmc-parotid/raw.h5` | salivary gland / human | 10x v3 (Cell Ranger 7.0.1) | CC-BY-4.0, Zenodo 7470666 (GSE188478); 45 MB (plus 75 MB raw) |
+
+```bash
+python3 benchmarks/_fetch_fixtures.py             # downloads both parotid H5 files
+python3 benchmarks/_fetch_fixtures.py --export-mtx  # exports tests/data/pbmc-parotid/mtx/ for the R cross-check
+```
+
+The parotid dataset is deliberately not PBMC: different tissue and a newer
+chemistry than the PBMC4K reference, so the harness can show the pipeline
+generalises beyond the reference fixture (run `tier-m-real --dataset
+pbmc-parotid` and read `species_detected`, `n_clusters`). Its `raw_all.h5`
+(unfiltered, with empty droplets) is retained for a future ambient/empty-drop
+comparison family.
+
+## Head-to-head vs Seurat (tier-h2h-qc)
+
+`tier-h2h-qc` compares validrops' Stage 1+2 callouts against a deterministic
+re-implementation of the classic **Seurat default QC subset** on the identical
+bounded fixture. The baseline thresholds are part of the artifact parameters
+(`seurat_mito_cap`, `seurat_min_features`, `seurat_min_counts`,
+`seurat_min_cells`) and are cross-validated against **real Seurat** in
+`benchmarks/R/h2h_seurat_crosscheck.R` (R only needed for the cross-check, never
+for the benchmark itself):
+
+```bash
+Rscript benchmarks/R/h2h_seurat_crosscheck.R tests/data/pbmc-parotid/mtx
+```
+
+On the full parotid matrix (20,015 cells) the Python baseline reproduces Seurat
+5.5.1 exactly: 19,811 kept (203 mito-breaches, 18 low-feature, 0 low-count).
+The agreement metrics (kept-set Jaccard, per-tool kept fractions, validrops'
+adaptive mito threshold vs Seurat's fixed cap) are the preprint-facing numbers;
+`compare_artifacts` on the baseline/current pair gives the runtime comparison.
 
 ## Measurement protocol
 
