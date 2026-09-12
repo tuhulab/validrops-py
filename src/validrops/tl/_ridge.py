@@ -97,6 +97,10 @@ def roc_best_threshold(labels: np.ndarray, scores: np.ndarray) -> tuple[float, f
     ``(threshold, specificity)``.
     """
     positive = (np.asarray(labels) == "dead").astype(int)
+    if len(np.unique(positive)) < 2:
+        # pROC::roc errors on a single-class response; surface the same
+        # condition explicitly instead of sklearn's cryptic zero-size crash.
+        raise ValueError("roc_best_threshold requires both live and dead labels")
     fpr, tpr, thresholds = roc_curve(positive, np.asarray(scores, dtype=np.float64))
     youden = tpr - fpr
     best = np.flatnonzero(youden == youden.max())

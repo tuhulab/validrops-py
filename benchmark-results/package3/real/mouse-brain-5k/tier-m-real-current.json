@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "benchmark": "tier-m-real",
+  "revision": "a905519f0beac866a88a7977bb350edca9ed2fff",
+  "dirty": true,
+  "environment": {
+    "os": "Linux",
+    "os_release": "7.0.0-31-generic",
+    "architecture": "x86_64",
+    "python_version": "3.12.14",
+    "python_implementation": "CPython",
+    "logical_cpus": 8,
+    "physical_cpus": 4,
+    "available_memory_bytes": 23450210304,
+    "numpy_version": "2.4.4",
+    "scipy_version": "1.17.1",
+    "sklearn_version": "unavailable",
+    "anndata_version": "0.12.10",
+    "igraph_version": "1.0.0",
+    "blas_config": {},
+    "blas_threadpool": "[{'numpy_version': '2.4.4',\n  'python': '3.12.14 (main, Sep  1 2026, 14:16:52) [Clang 22.1.3 ]',\n  'uname': uname_result(system='Linux', node='tuhu-vm-general', release='7.0.0-31-generic', version='#31-Ubuntu SMP PREEMPT_DYNAMIC Sat Aug  1 04:26:38 UTC 2026', machine='x86_64')},\n {'simd_extensions': {'baseline': ['X86_V2'],\n                      'found': ['X86_V3', 'X86_V4', 'AVX512_ICL'],\n                      'not_found': ['AVX512_SPR']}},\n {'ignore_floating_point_errors_in_matmul': False},\n {'architecture': 'SkylakeX',\n  'filepath': '/work/TUHU/repos/validrops-py/.venv/lib/python3.12/site-packages/numpy.libs/libscipy_openblas64_-32a4b2a6.so',\n  'internal_api': 'openblas',\n  'num_threads': 8,\n  'prefix': 'libscipy_openblas',\n  'threading_layer': 'pthreads',\n  'user_api': 'blas',\n  'versi",
+    "thread_environment": null
+  },
+  "input": {
+    "profile": "S",
+    "params": {
+      "profile": "S",
+      "nfeats": 300,
+      "npcs": 10,
+      "k_min": 150,
+      "res_shallow": 0.1,
+      "top_n": 10,
+      "n_cells_cap": 1500,
+      "dataset": "mouse-brain-5k",
+      "workload": "Stage-3 mouse-brain-5k",
+      "seed": 0
+    },
+    "fingerprint": "d62e267b222d61da",
+    "meta": {
+      "cells_cap": 1500,
+      "source": "adult mouse brain",
+      "species": "mouse",
+      "chemistry": "10x 3' single-nucleus (5k Adult Mouse Brain Nuclei, Cell Ranger 7.0.0)",
+      "license": "Zenodo record 7993711 (scDGD training data; permissive reuse)",
+      "fixture_cells": 7377,
+      "fixture_genes": 32285
+    }
+  },
+  "implementation": {
+    "label": "current",
+    "source_hashes": {
+      "benchmarks/_datasets.py": "500d54e5eb650f36",
+      "benchmarks/_fixtures.py": "314d5c2621efc977",
+      "benchmarks/_measure.py": "6b66366b407d04f1",
+      "benchmarks/run.py": "67fbcdfcd2d72d31",
+      "src/validrops/_constants.py": "d5b85f7e71247b1d",
+      "src/validrops/tl/_deviance.py": "b3bb4d9afa657104",
+      "src/validrops/tl/_snn.py": "c0536038a02c3c1b",
+      "src/validrops/tl/expression_metrics.py": "74dd2b785e2a94f7",
+      "src/validrops/tl/quality_metrics.py": "e0331993952771b3"
+    },
+    "harness_hashes": {
+      "benchmarks/_datasets.py": "500d54e5eb650f36",
+      "benchmarks/_fixtures.py": "314d5c2621efc977",
+      "benchmarks/_measure.py": "6b66366b407d04f1",
+      "benchmarks/run.py": "67fbcdfcd2d72d31"
+    }
+  },
+  "timing_seconds": {
+    "median": 36.947731481999654,
+    "minimum": 36.2324260209989,
+    "mad": 0.04762061900146364,
+    "repetitions": 3,
+    "raw": [
+      36.2324260209989,
+      36.99535210100112,
+      36.947731481999654
+    ],
+    "coefficient_of_variation": 0.011637589421262392
+  },
+  "peak_rss_bytes": {
+    "worker_max": 1559134208,
+    "worker_min": 1533923328,
+    "worker_mean": 1547277653.3333333,
+    "per_sample": [
+      1559134208,
+      1548775424,
+      1533923328
+    ],
+    "method": "resource.getrusage(RUSAGE_SELF).ru_maxrss inside each spawned child",
+    "scope": "process high-water including deterministic input generation and warm-up in the same child; identical inputs across baseline/current isolate the kernel delta",
+    "unit": "bytes"
+  },
+  "correctness": {
+    "status": "pass",
+    "metrics": {
+      "workload": "Stage-3 expression_metrics on mouse-brain-5k (bounded subset)",
+      "all_cells_clustered": true,
+      "stats_frame_columns": true,
+      "n_clusters": 19,
+      "stats_shape": [
+        19,
+        11
+      ],
+      "n_obs": 1500,
+      "species_detected": "mouse",
+      "dataset": "mouse-brain-5k",
+      "deterministic_warmup_timed": true,
+      "deterministic_sample_fraction": 1.0
+    }
+  },
+  "warnings": [],
+  "pbmc": null,
+  "fixture": {
+    "available": true,
+    "path": "/work/TUHU/repos/validrops-py/tests/data/mouse-brain-5k/adata.h5ad",
+    "override": "auto",
+    "dataset": "mouse-brain-5k",
+    "meta": {
+      "path": "tests/data/mouse-brain-5k/adata.h5ad",
+      "loader": "h5ad",
+      "tissue": "adult mouse brain",
+      "species": "mouse",
+      "chemistry": "10x 3' single-nucleus (5k Adult Mouse Brain Nuclei, Cell Ranger 7.0.0)",
+      "condition": "filtered; counts in raw.X (X is normalized)",
+      "license": "Zenodo record 7993711 (scDGD training data; permissive reuse)",
+      "n_cells": 7377,
+      "n_genes": 32285,
+      "recommended_cap": 1500,
+      "fetch": "python3 benchmarks/_fetch_fixtures.py --extra"
+    }
+  }
+}

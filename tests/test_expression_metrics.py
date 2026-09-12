@@ -317,3 +317,43 @@ def test_stage3_never_calls_louvain_wrapper(monkeypatch):
 
     monkeypatch.setattr("validrops.tl._snn.louvain", _boom)
     validrops.tl.expression_metrics(_tiny_stage3_adata(), nfeats=30, npcs=5, random_state=0)
+
+
+def _tiny_embed_matrix(rows: int = 120, cols: int = 40, seed: int = 0) -> sp.csr_matrix:
+    """Small well-conditioned sparse matrix for _embed determinism checks."""
+    rng = np.random.default_rng(seed)
+    matrix = sp.random(rows, cols, density=0.25, random_state=rng, format="csr", dtype=np.float32)
+    # ensure all columns have some signal so nothing is degenerate
+    matrix.data[:] = np.abs(matrix.data) + 0.5
+    return matrix
+
+
+@pytest.mark.parametrize("random_state", [0, 7, 42])
+def test_embed_is_deterministic_for_fixed_seed(random_state):
+    """svds must be seeded: same random_state => bit-identical embedding.
+
+    This is the reproducibility contract restored by Efficiency A. Before the
+    fix, svds drew its ARPACK starting vector from OS entropy, so Stage-3
+    embeddings (and clustering downstream) were run-to-run nondeterministic on
+    real matrices.
+    """
+    from validrops.tl.expression_metrics import _embed
+
+    norm = _tiny_embed_matrix()
+    first = _embed(norm, npcs=5, random_state=random_state)
+    second = _embed(norm, npcs=5, random_state=random_state)
+    assert first.shape == (norm.shape[0], 5)
+    np.testing.assert_array_equal(first, second)
+
+
+def test_embed_different_seeds_are_singular_vector_equivalent():
+    """On a well-conditioned matrix different v0 seeds converge to the same
+    subspace (up to sign); the guarantee is per-seed determinism, but this
+    sanity-check guards against a degenerate rewrite of the SVD itself."""
+    from validrops.tl.expression_metrics import _embed
+
+    norm = _tiny_embed_matrix()
+    a = _embed(norm, npcs=5, random_state=0)
+    b = _embed(norm, npcs=5, random_state=1)
+    top = np.abs(a[:, 0] @ b[:, 0])
+    assert top > 0.99  # leading left singular vectors agree up to sign

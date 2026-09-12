@@ -314,7 +314,16 @@ def _one_run(embedding, labels, qc, fail_weight, cor_threshold, epochs, nrep, nf
             return labels, "Failed"
         new_prob = np.median(np.column_stack(columns), axis=1)
         passing = qc == "pass"
-        cut, specificity = roc_best_threshold(labels[passing], new_prob[passing])
+        cut_labels = labels[passing]
+        if len(np.unique(cut_labels)) < 2:
+            # No live/dead separation to calibrate on this iteration. R's
+            # pROC::roc errors on a single-class response; the surrounding
+            # port guards (the min(sum(dead), sum(live)) == 0 -> "Failed"
+            # below) express the same abort as a soft-fail, so mirror that
+            # *before* the threshold search instead of letting sklearn's
+            # degenerate roc_curve crash with a zero-size reduction.
+            return labels, "Failed"
+        cut, specificity = roc_best_threshold(cut_labels, new_prob[passing])
         prediction = np.where(new_prob > cut, "dead", "live")
 
         disagree = prediction != labels

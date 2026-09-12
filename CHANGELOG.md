@@ -23,8 +23,12 @@ and this project adheres to [Semantic Versioning][].
 - Validation suite against R-generated fixtures on PBMC 4K, with a bounded end-to-end barcode concordance of 0.9193
 - Package scaffolding: CI (test/build/release), Sphinx docs on readthedocs, pre-commit, codecov
 - Benchmark harness (Package 2): `tier-m-real` registry-driven real-data Stage-3 family and `tier-h2h-qc` head-to-head QC family (validrops Stage 1+2 vs a Seurat-default baseline cross-validated against Seurat 5.5.1), with the first non-PBMC fixture — human parotid gland, 10x v3 (CC-BY-4.0) — documented in `benchmarks/README.md`
+- Benchmark harness (Package 3): four more registry datasets (mouse brain nuclei, carotid Visium, mouse olfactory bulb Visium, unfiltered parotid), a cross-dataset sweep runner, artifact validator and a NAR GAB manuscript skeleton with artifact-regenerated figures (`manuscript/`)
+- `tl.quality_metrics` hotspot optimization: gene-set membership now uses python-set hashing instead of `np.isin` on object-dtype arrays (`_annotation.gene_sets`, metric selectors, `adata.var` masks) — quality metrics 9.25 s -> 0.78 s on 1,500-cell parotid (11.8x), full QC benchmark family 23.15 s -> 5.58 s (4.15x), with bit-identical output (verified column-wise with `equal_nan=True` and kept-set Jaccard 0.5179 before/after)
 
 ### Fixed
 
 - `test_pbmc_detection_rooted_at_repo` asserted the git-ignored PBMC4K fixture is present, which could never hold on CI; availability now mirrors on-disk presence (fixture-gated tests skip when absent)
 - Sphinx `-W` build failed on `docs/internal/**` (untracked working notes never added to a toctree, with xrefs into excluded `docs/superpowers/**`); internal notes are now excluded from the published build like `docs/superpowers/**`
+- Stage-3 sparse SVD (`expression_metrics._embed`) drew its ARPACK starting vector from OS entropy because the seeded `random_state` parameter was never passed to `svds`; embeddings (and clustering downstream) were run-to-run nondeterministic on real data, flagged by the benchmark harness as a pre-existing warning. The call is now seeded; output is bit-identical for a fixed seed and every real-data tier artifact reports `deterministic_warmup_timed: true` with zero warnings
+- Stage-4 ridge consensus loop crashed with a numpy zero-size reduction when an iteration's QC-passing subset had a single class (surfaced on pbmc-parotid under a different BLAS thread order); the iteration now soft-fails with the R-consistent `"Failed"` flag, and `roc_best_threshold` raises a clear `ValueError` on single-class input

@@ -171,7 +171,14 @@ def _embed(norm: sp.csr_matrix, npcs: int, random_state: int) -> np.ndarray:
 
     # irlba::irlba(data.scaled, nv=npcs, nu=npcs) -> sv <- u %*% diag(d). svds
     # returns ascending singular values, so flip to descending to match irlba's.
-    u, s, _ = svds(scaled, k=npcs)
+    # random_state seeds ARPACK's starting vector v0: without it svds draws from
+    # OS entropy, so the embedding (and everything downstream of it) was
+    # run-to-run nondeterministic on ill-conditioned real matrices (the
+    # benchmark harness flagged this as a pre-existing warning). Stage 4's
+    # equivalent call already passes random_state; this restores the same
+    # determinism contract here. `random_state` was threaded from the public
+    # API but unused before this fix.
+    u, s, _ = svds(scaled, k=npcs, random_state=random_state)
     order = np.argsort(-s)
     return u[:, order] * s[order]
 

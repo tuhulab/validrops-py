@@ -169,7 +169,11 @@ def gene_sets(gene_names: np.ndarray, match: AnnotationMatch) -> dict[str, np.nd
     ribo_ids = set(lookup.loc[lookup["row_id"].isin(ribo_row_ids), "value"])
 
     def select(ids: set[str]) -> np.ndarray:
-        mask = np.isin(cleaned, list(ids))
+        # pandas .isin over a python set hashes the strings natively; numpy's
+        # np.isin over an object-dtype array is ~10x slower for the same
+        # membership result (measured 8.4s of 9.2s in quality_metrics on the
+        # parotid fixture). Membership semantics are identical.
+        mask = pd.Series(cleaned).isin(ids).to_numpy()
         return np.asarray(by_clean.to_numpy()[mask], dtype=str)
 
     return {

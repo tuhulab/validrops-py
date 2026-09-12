@@ -97,6 +97,40 @@ The agreement metrics (kept-set Jaccard, per-tool kept fractions, validrops'
 adaptive mito threshold vs Seurat's fixed cap) are the preprint-facing numbers;
 `compare_artifacts` on the baseline/current pair gives the runtime comparison.
 
+## Package 3 — preprint evidence sweep
+
+The preprint sweep (`benchmark-results/package3/`) runs both real-data families
+on every registered dataset:
+
+```bash
+python3 benchmarks/_fetch_fixtures.py --extra   # mouse brain nuclei, carotid Visium, olfactory bulb, parotid raw subset
+uv run --group test --group dev python benchmarks/scripts/run_sweep.py --reps 3 --profile S
+uv run --group test --group dev python benchmarks/scripts/validate_artifacts.py
+uv run --group test --group dev python manuscript/render_figures.py
+```
+
+Registered datasets (see `benchmarks/_fixtures.py` for loaders and metadata):
+
+| `--dataset` | Species / tissue | Technology | Fixture |
+|---|---|---|---|
+| `pbmc-parotid` | human parotid | 10x 3' v3 scRNA-seq | `tests/data/pbmc-parotid/raw.h5` |
+| `pbmc-parotid-raw` | human parotid | 10x 3' v3, unfiltered (ambient) | `tests/data/pbmc-parotid/raw_subset.h5ad` (barcodes 3001-4500) |
+| `mouse-brain-5k` | mouse brain | 10x 3' single-nucleus | `tests/data/mouse-brain-5k/adata.h5ad` (counts in raw.X) |
+| `carotid-visium` | human carotid artery | 10x Visium v1 spatial | `tests/data/carotid-visium/raw.h5` |
+| `mouse-olfactory-bulb` | mouse olfactory bulb | 10x Visium v1 spatial | `tests/data/mouse-olfactory-bulb/mtx/` (gzipped MTX) |
+
+The manuscript skeleton (`manuscript/manuscript.md`), the deterministic figure
+renderer (`manuscript/render_figures.py`), artifact validation
+(`benchmarks/scripts/validate_artifacts.py`) and the Stage-4 ridge thread
+measurement (`benchmarks/scripts/measure_stage4_threads.py`) all read from
+these committed artifacts only — no network, no live package state.
+
+Package-3 Efficiency C (exact-output hotspot optimization): `tl.quality_metrics`
+gene-set membership 9.25 s -> 0.78 s on 1,500 parotid cells (11.8x; bit-identical
+output, before/after artifacts in `benchmark-results/package3/c-efficiency/`).
+Efficiency A (deterministic Stage-3 SVD) and the Stage-4 thread measurement
+(criterion B) are documented in `package3-summary.md`.
+
 ## Measurement protocol
 
 - Every measured repetition runs in a fresh `multiprocessing("spawn")` child.

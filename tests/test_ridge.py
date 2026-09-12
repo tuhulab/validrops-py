@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 from sklearn.datasets import make_classification
 
 from validrops.tl._ridge import logistic_ridge_1se, roc_best_threshold
@@ -47,3 +48,11 @@ def test_roc_best_threshold_on_random_scores_is_finite():
     threshold, specificity = roc_best_threshold(labels, rng.random(200))
     assert np.isfinite(threshold)
     assert 0.0 <= specificity <= 1.0
+
+
+def test_roc_best_threshold_rejects_single_class_input():
+    """Single-class responses (no dead cells) must raise a clear error, not a
+    numpy zero-size reduction (surfaced on pbmc-parotid at BLAS thread count 2
+    during the Package-3 Stage-4 thread sweep)."""
+    with pytest.raises(ValueError, match="both live and dead"):
+        roc_best_threshold(np.array(["live", "live", "live"]), np.array([0.1, 0.2, 0.3]))

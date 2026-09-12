@@ -1,0 +1,35 @@
+{
+  "benchmark": "stage4-ridge-threads",
+  "dataset": "pbmc-parotid",
+  "n_cells_cap": 800,
+  "threads": 2,
+  "thread_variables": [
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS"
+  ],
+  "n_jobs": 1,
+  "timing_seconds": {
+    "median": 1052.8138811979989,
+    "raw": [
+      1052.8138811979989
+    ],
+    "repetitions": 1
+  },
+  "output": {
+    "n_dead": [
+      2
+    ],
+    "n_live": [
+      424
+    ],
+    "n_uncertain": [
+      1
+    ],
+    "flag": "Failed",
+    "threshold": 5.698679018207336,
+    "qc_pass": 399
+  }
+}
