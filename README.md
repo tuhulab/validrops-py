@@ -146,8 +146,14 @@ Rscript tests/R/extract_annotation.R   # sysdata.rda -> src/validrops/data/annot
 Rscript tests/R/generate_reference.R   # every tests/reference_outputs/*.csv
 ```
 
-- `tests/data/pbmc4k/raw.h5` is gitignored (17 MB); the suite skips tests that
-  need it when it is absent.
+- `tests/data/pbmc4k/raw.h5` is gitignored (17 MB, 10x Chromium v2 / Cell Ranger
+  2.1.0). Fetch it with the other benchmark fixtures:
+
+  ```bash
+  python3 benchmarks/_fetch_fixtures.py --all
+  ```
+
+  The suite skips tests that need it when it is absent.
 
 ### R → Python translation rules
 

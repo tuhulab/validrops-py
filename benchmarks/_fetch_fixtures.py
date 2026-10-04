@@ -1,7 +1,13 @@
-"""Download the parotid-gland 10x fixtures (Zenodo 7470666, CC-BY-4.0).
+"""Download benchmark fixtures into git-ignored ``tests/data/``.
 
-Writes to tests/data/pbmc-parotid/ (git-ignored). Resumable: an existing
-file of the expected size is kept; partial files are re-downloaded.
+Default (no arguments): the parotid-gland 10x matrices (Zenodo 7470666, CC-BY-4.0).
+``--extra``: mouse-brain-5k (Zenodo 7993711), carotid-visium (Zenodo 22024050),
+mouse-olfactory-bulb (Zenodo 15024747), and the derived parotid raw subset.
+``--all``: the PBMC 4k raw HDF5 (10x Chromium v2, Cell Ranger 2.1.0) plus
+parotid, mouse-brain-5k, carotid-visium, and mouse-olfactory-bulb.
+
+Resumable: an existing file of the expected size is kept; partial files are
+re-downloaded.
 """
 
 import sys
@@ -35,6 +41,15 @@ EXTRA_TARGETS = {
     },
 }
 EXTRA_OUT = Path(__file__).resolve().parents[1] / "tests" / "data"
+
+# 10x Genomics public PBMC 4k raw gene-barcode matrix (Chromium v2,
+# Cell Ranger 2.1.0). Size is the HTTP content-length of that object
+# (17,460,932 bytes).
+PBMC_URL = (
+    "https://cf.10xgenomics.com/samples/cell-exp/2.1.0/pbmc4k/pbmc4k_raw_gene_bc_matrices_h5.h5"
+)
+PBMC_SIZE = 17_460_932
+PBMC_OUT = EXTRA_OUT / "pbmc4k" / "raw.h5"
 
 
 def _record_files(record_url: str) -> dict[str, str]:
@@ -146,9 +161,10 @@ def export_mtx() -> None:
     print(f"ok mtx export -> {mtx} ({adata.shape[0]} cells x {adata.shape[1]} genes)")
 
 
-def download(url: str, dest: Path, expected: int) -> None:
+def download(url: str, dest: Path, expected: int, label: str | None = None) -> None:
+    shown = label or dest.name
     if dest.exists() and dest.stat().st_size == expected:
-        print(f"keep {dest.name} ({dest.stat().st_size} bytes)")
+        print(f"keep {shown} ({dest.stat().st_size} bytes)")
         return
     tmp = dest.with_suffix(dest.suffix + ".part")
     req = urllib.request.Request(url, headers={"User-Agent": "validrops-bench/0.1"})
@@ -158,11 +174,22 @@ def download(url: str, dest: Path, expected: int) -> None:
             if not chunk:
                 break
             fh.write(chunk)
-    if tmp.stat().st_size != expected:
+    got = tmp.stat().st_size
+    if got != expected:
         tmp.unlink(missing_ok=True)
-        raise RuntimeError(f"{dest.name}: size mismatch ({tmp.stat().st_size} != {expected})")
+        raise RuntimeError(f"{shown}: size mismatch ({got} != {expected})")
     tmp.rename(dest)
-    print(f"ok {dest.name} ({dest.stat().st_size} bytes)")
+    print(f"ok {shown} ({got} bytes)")
+
+
+def download_pbmc() -> None:
+    """Download the PBMC 4k raw HDF5 to ``tests/data/pbmc4k/raw.h5``.
+
+    Same contract as the other fixtures: size-checked against the pinned
+    content-length, and skipped when that file is already the right size.
+    """
+    PBMC_OUT.parent.mkdir(parents=True, exist_ok=True)
+    download(PBMC_URL, PBMC_OUT, PBMC_SIZE, label="pbmc4k/raw.h5")
 
 
 def main() -> int:
@@ -180,6 +207,8 @@ if __name__ == "__main__":
         export_mtx()
         sys.exit(0)
     if len(sys.argv) > 1 and sys.argv[1] == "--all":
+        # PBMC 4k plus the four datasets already fetched by the default run and --extra.
+        download_pbmc()
         main()
         download_extra()
         sys.exit(0)
