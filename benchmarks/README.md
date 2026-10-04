@@ -62,10 +62,11 @@ dataset for the preprint (different tissue/condition/technology) is one entry.
 
 | Dataset | `--dataset` | Fixture path | Tissue / species | Chemistry | License / source |
 |---|---|---|---|---|---|
-| PBMC 4K | (tier-m-pbmc) | `tests/data/pbmc4k/raw.h5` | PBMC / human | 10x v2 | 10x Genomics demo; 17 MB |
+| PBMC 4K | (tier-m-pbmc) | `tests/data/pbmc4k/raw.h5` | PBMC / human | 10x Chromium v2 (Cell Ranger 2.1.0) | `python3 benchmarks/_fetch_fixtures.py --all`; 10x public raw HDF5, 17 MB |
 | Parotid gland | `pbmc-parotid` | `tests/data/pbmc-parotid/raw.h5` | salivary gland / human | 10x v3 (Cell Ranger 7.0.1) | CC-BY-4.0, Zenodo 7470666 (GSE188478); 45 MB (plus 75 MB raw) |
 
 ```bash
+python3 benchmarks/_fetch_fixtures.py --all       # PBMC 4k (v2 / Cell Ranger 2.1.0) plus parotid, mouse-brain-5k, carotid-visium, and mouse-olfactory-bulb
 python3 benchmarks/_fetch_fixtures.py             # downloads both parotid H5 files
 python3 benchmarks/_fetch_fixtures.py --export-mtx  # exports tests/data/pbmc-parotid/mtx/ for the R cross-check
 ```
